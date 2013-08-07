@@ -1,10 +1,6 @@
 #include <assert.h>
 #include <elf.h>
 #include <fcntl.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -37,51 +33,22 @@ static void closefile(struct file* f) {
     assert(res != -1);
 }
 
-static void parsesymbols(Elf32_Sym* symtab, Elf32_Word* symnum,
-			 Elf32_Versym* vertab, Elf32_Word* vernum) {
-    unsigned int c = 1;
-    unsigned int d = 1;
-    assert(*symnum / sizeof(*symtab) == *vernum / sizeof(*vertab));
-    while (c < *symnum / sizeof(*symtab)) {
-	if (symtab[c].st_shndx != SHN_UNDEF) {
-	    memmove(symtab + d, symtab + c, sizeof(*symtab));
-	    memmove(vertab + d, vertab + c, sizeof(*vertab));
-	    ++d;
-	}
-	++c;
-    }
-    *symnum = d * sizeof(*symtab);
-    *vernum = d * sizeof(*vertab);
-    printf("%d/%d dynamic symbols stripped.\n", (c - d), c);
+static void parsesymbols(Elf32_Sym* symtab, Elf32_Word symnum) {
+    unsigned int c;
+    for (c = 1; c < symnum; ++c)
+	if ((symtab[c].st_shndx == SHN_UNDEF) &&
+	    (ELF32_ST_BIND(symtab[c].st_info) == STB_GLOBAL))
+	    symtab[c].st_info =
+		ELF64_ST_INFO(STB_WEAK, ELF32_ST_TYPE(symtab[c].st_info));
 }
 
 static void parseshdrs(void* mem, Elf32_Shdr* tab, int num) {
     int c;
-    Elf32_Sym* symtab;
-    Elf32_Word* symnum;
-    int symtabfound = 0;
-    Elf32_Versym* vertab;
-    Elf32_Word* vernum;
-    int vertabfound = 0;
-    for (c = 0; c < num; ++c) {
-	switch (tab[c].sh_type) {
-	case SHT_DYNSYM:
-	    symtab = mem + tab[c].sh_offset;
-	    symnum = &(tab[c].sh_size);
+    for (c = 0; c < num; ++c)
+	if (tab[c].sh_type == SHT_DYNSYM) {
 	    assert(tab[c].sh_entsize == sizeof(Elf32_Sym));
-	    ++symtabfound;
-	    break;
-	case SHT_GNU_versym:
-	    vertab = mem + tab[c].sh_offset;
-	    vernum = &(tab[c].sh_size);
-	    assert(tab[c].sh_entsize == sizeof(Elf32_Versym));
-	    ++vertabfound;
-	    break;
+	    parsesymbols(mem + tab[c].sh_offset, tab[c].sh_size / sizeof(Elf32_Sym));
 	}
-    }
-    assert(symtabfound == 1);
-    assert(vertabfound == 1);
-    parsesymbols(symtab, symnum, vertab, vernum);
 }
 
 static void parseobject(void* mem) {
